@@ -1,0 +1,23 @@
+# Compiled binary
+datetree
+
+# Generated templ files
+*_templ.go
+
+# Tailwind CLI binary (downloaded per-platform; not checked in)
+tools/tailwindcss
+
+# Tailwind build output (generated from static/app.src.css)
+static/app.css
+
+# Editor / OS
+.DS_Store
+
+# Cline workspace
+.cline/
+
+# Local-only Claude settings (machine-specific overrides)
+.claude/settings.local.json
+
+# vscode
+.vscode/

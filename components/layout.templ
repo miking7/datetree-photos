@@ -1,0 +1,68 @@
+package components
+
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title }</title>
+			<link rel="icon" type="image/png" sizes="96x96" href="/static/favicon-96.png"/>
+			<link rel="icon" type="image/svg+xml" sizes="any" href="/static/favicon.svg"/>
+			<link rel="icon" href="/static/favicon.ico"/>
+			<link rel="apple-touch-icon" href="/static/favicon-180.png"/>
+			<link rel="manifest" href="/static/favicon.webmanifest"/>
+			<meta name="theme-color" content="#4F46E5"/>
+			<link rel="stylesheet" href="/static/app.css"/>
+			<script src="/static/htmx.min.js" defer></script>
+			<script src="/static/htmx-ext-sse.js" defer></script>
+			<script>
+				function fillRecent(e) {
+					e.preventDefault();
+					const name = e.currentTarget.dataset.target;
+					document.querySelector('[name="' + name + '"]').value = e.currentTarget.textContent;
+					// Blur the link so :focus-within no longer matches and the
+					// combobox dropdown closes after selection.
+					e.currentTarget.blur();
+				}
+			</script>
+		</head>
+		<body class="min-h-screen bg-canvas text-secondary antialiased">
+			<header class="border-b border-border bg-surface">
+				<div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
+					<a href="/" class="inline-flex items-center gap-2 text-base font-semibold tracking-tight text-secondary hover:text-primary">
+						<img src="/static/datetree-logo-sm.png" alt="DateTree Photos - Your photos. In the right place." class="h-7 w-7"/>
+						DateTree Photos
+					</a>
+					<a href="/settings" class="inline-flex items-center gap-1.5 text-sm font-medium text-neutral hover:text-primary">
+						@IconSettings()
+						Settings
+					</a>
+				</div>
+			</header>
+			<main>
+				{ children... }
+			</main>
+			<footer class="border-t border-border bg-surface">
+				<div class="mx-auto max-w-7xl px-6 py-3 text-xs text-neutral">
+					DateTree Photos { Version }
+				</div>
+			</footer>
+		</body>
+	</html>
+}
+
+// PageNarrow centers tight forms (Home, Settings, Done, errors). Wide enough
+// to hold long source/destination paths in form inputs without truncating.
+templ PageNarrow() {
+	<div class="mx-auto max-w-[1080px] px-6 py-8">
+		{ children... }
+	</div>
+}
+
+// PageWide gives the preview table room to breathe.
+templ PageWide() {
+	<div class="mx-auto max-w-7xl px-6 py-6">
+		{ children... }
+	</div>
+}

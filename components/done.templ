@@ -1,0 +1,78 @@
+package components
+
+import "fmt"
+
+type DoneFailure struct {
+	Source string
+	ErrMsg string
+}
+
+type DoneModel struct {
+	Source       string
+	Dest         string
+	Mode         string
+	Total        int
+	Moved        int
+	Copied       int
+	Skipped      int
+	Failed       int
+	DurationStr  string
+	ManifestPath string
+	ManifestURL  string
+	Failures     []DoneFailure
+}
+
+func (m DoneModel) Counts() string {
+	return fmt.Sprintf("%d moved · %d copied · %d skipped · %d failed (of %d total)",
+		m.Moved, m.Copied, m.Skipped, m.Failed, m.Total)
+}
+
+templ Done(m DoneModel) {
+	@Layout("DateTree Photos") {
+		@PageNarrow() {
+			<div class="mb-6">
+				<h1 class="text-2xl font-semibold tracking-tight text-secondary">Done</h1>
+				<p class="mt-1 font-mono text-xs text-neutral">{ m.Source } → { m.Dest } ({ m.Mode })</p>
+			</div>
+			@Card() {
+				<dl class="space-y-3">
+					<div>
+						<dt class="text-xs font-medium uppercase tracking-wide text-neutral">Result</dt>
+						<dd class="mt-1 text-sm font-medium text-secondary">{ m.Counts() }</dd>
+					</div>
+					if m.DurationStr != "" {
+						<div>
+							<dt class="text-xs font-medium uppercase tracking-wide text-neutral">Elapsed</dt>
+							<dd class="mt-1 font-mono text-sm text-secondary">{ m.DurationStr }</dd>
+						</div>
+					}
+					<div>
+						<dt class="text-xs font-medium uppercase tracking-wide text-neutral">Manifest</dt>
+						<dd class="mt-1 text-sm">
+							<a href={ templ.SafeURL(m.ManifestURL) } class="font-mono text-xs text-primary hover:text-primary-hover hover:underline">{ m.ManifestPath }</a>
+						</dd>
+					</div>
+				</dl>
+			}
+			if len(m.Failures) > 0 {
+				<div class="mt-5 rounded-xl border border-danger/30 bg-danger-soft p-6 shadow-sm">
+					<div class="mb-3 flex items-center gap-2 text-danger">
+						@IconAlertCircle()
+						<strong class="text-sm font-semibold">{ fmt.Sprintf("%d failure(s)", len(m.Failures)) }</strong>
+					</div>
+					<ul class="space-y-2 text-sm">
+						for _, f := range m.Failures {
+							<li class="flex flex-col gap-0.5">
+								<code class="truncate font-mono text-xs text-secondary">{ f.Source }</code>
+								<span class="text-xs text-danger">{ f.ErrMsg }</span>
+							</li>
+						}
+					</ul>
+				</div>
+			}
+			<div class="mt-6">
+				<a href="/" class={ buttonClasses("primary") }>Start over</a>
+			</div>
+		}
+	}
+}

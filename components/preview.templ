@@ -1,0 +1,251 @@
+package components
+
+import "fmt"
+
+type PreviewRow struct {
+	Source      string // basename for the cell text
+	SourceFull  string // absolute path for the title attribute
+	CaptureDate string
+	DateSource  string
+	DestRel     string
+	DestAbs     string
+	Conflict    bool
+	HasError    bool
+	Status      string // "OK" | "Conflict" | "Error" | "mtime"
+}
+
+type PreviewModel struct {
+	Source         string
+	Dest           string
+	Total          int
+	Conflicts      int
+	MtimeFallbacks int
+	Errors         int
+	Rows           []PreviewRow
+}
+
+func (m PreviewModel) Summary() string {
+	return fmt.Sprintf("%d files · %d conflicts · %d mtime fallbacks · %d errors",
+		m.Total, m.Conflicts, m.MtimeFallbacks, m.Errors)
+}
+
+templ Preview(m PreviewModel) {
+	@Layout("DateTree Photos") {
+		@PageWide() {
+			<div class="mb-5">
+				<h1 class="text-2xl font-semibold tracking-tight text-secondary">Preview</h1>
+				<p class="mt-1 font-mono text-xs text-neutral">{ m.Source } → { m.Dest }</p>
+			</div>
+			// Form wraps the table so the checked include= values post with the
+			// Execute buttons. type="button" keeps native submit out of the way so
+			// htmx's per-button hx-vals/hx-post is what fires.
+			<form>
+				<div class="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-surface px-4 py-3 shadow-sm">
+					<div class="text-sm">
+						<span class="font-semibold text-secondary">{ fmt.Sprintf("%d", m.Total) } files</span>
+						<span class="text-neutral">
+							·
+							<span class="text-tertiary">{ fmt.Sprintf("%d conflicts", m.Conflicts) }</span>
+							·
+							{ fmt.Sprintf("%d mtime fallbacks", m.MtimeFallbacks) }
+							·
+							<span class="text-danger">{ fmt.Sprintf("%d errors", m.Errors) }</span>
+						</span>
+					</div>
+					<div class="flex items-center gap-3">
+						<div class="flex items-center gap-2">
+							<button type="button" data-bulk="tick" disabled class={ buttonClasses("outlined") + " px-3 py-1.5 text-xs" }>Tick selected</button>
+							<button type="button" data-bulk="untick" disabled class={ buttonClasses("outlined") + " px-3 py-1.5 text-xs" }>Untick selected</button>
+						</div>
+						<span class="hidden h-6 w-px bg-border sm:block"></span>
+						<a href="/" class={ buttonClasses("outlined") }>Back</a>
+						<button
+							type="button"
+							hx-post="/execute"
+							hx-vals='{"mode":"copy"}'
+							hx-target="body"
+							hx-swap="innerHTML"
+							class={ buttonClasses("inverted") }
+						>Execute (Copy)</button>
+						<button
+							type="button"
+							hx-post="/execute"
+							hx-vals='{"mode":"move"}'
+							hx-target="body"
+							hx-swap="innerHTML"
+							class={ buttonClasses("primary") }
+						>Execute (Move)</button>
+					</div>
+				</div>
+				<div class="overflow-hidden rounded-xl border border-border bg-surface shadow-sm">
+					<div class="max-h-[calc(100vh-220px)] overflow-auto">
+						<table id="preview-table" class="w-full text-sm">
+							<thead class="sticky top-0 z-10 bg-canvas text-left text-xs font-semibold uppercase tracking-wide text-neutral">
+								<tr class="border-b border-border">
+									<th class="w-10 px-3 py-2"></th>
+									<th class="px-3 py-2">Source</th>
+									<th class="w-40 px-3 py-2">Capture Date</th>
+									<th class="w-24 px-3 py-2">Date</th>
+									<th class="px-3 py-2">Destination</th>
+									<th class="w-28 px-3 py-2">Status</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-border">
+								for i, r := range m.Rows {
+									@previewRow(i, r)
+								}
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</form>
+			// Range-select + bulk-toggle. Lives here (not in layout.templ) because it
+			// only applies to the preview screen, and the preview is delivered via a
+			// full body innerHTML swap so the script re-runs on every render.
+			<script>
+				(function () {
+					const table = document.getElementById('preview-table');
+					const tickBtn = document.querySelector('[data-bulk="tick"]');
+					const untickBtn = document.querySelector('[data-bulk="untick"]');
+					if (!table || !tickBtn || !untickBtn) return;
+
+					const rows = Array.from(table.querySelectorAll('tbody tr[data-row-idx]'));
+					const selected = new Set();
+					let anchor = null;
+
+					function render() {
+						rows.forEach((tr, i) => tr.classList.toggle('row-selected', selected.has(i)));
+						const any = selected.size > 0;
+						tickBtn.disabled = !any;
+						untickBtn.disabled = !any;
+					}
+
+					function setRange(a, b) {
+						selected.clear();
+						const lo = Math.min(a, b);
+						const hi = Math.max(a, b);
+						for (let i = lo; i <= hi; i++) selected.add(i);
+					}
+
+					table.addEventListener('click', (e) => {
+						if (e.target.matches('input[type="checkbox"]')) return;
+						const tr = e.target.closest('tr[data-row-idx]');
+						if (!tr) return;
+						const idx = Number(tr.dataset.rowIdx);
+
+						if (e.shiftKey && anchor !== null) {
+							setRange(anchor, idx);
+							const sel = window.getSelection();
+							if (sel) sel.removeAllRanges();
+						} else if (e.metaKey || e.ctrlKey) {
+							if (selected.has(idx)) selected.delete(idx); else selected.add(idx);
+							anchor = idx;
+						} else {
+							selected.clear();
+							selected.add(idx);
+							anchor = idx;
+						}
+						render();
+					});
+
+					function applyChecked(value) {
+						selected.forEach((i) => {
+							const cb = rows[i].querySelector('input[type="checkbox"]');
+							if (cb && !cb.disabled) cb.checked = value;
+						});
+					}
+					tickBtn.addEventListener('click', () => applyChecked(true));
+					untickBtn.addEventListener('click', () => applyChecked(false));
+				})();
+			</script>
+		}
+	}
+}
+
+// previewRow renders one tr. Tint classes are applied directly so the row
+// reads correctly regardless of selection state (row-selected wins via
+// !important in app.src.css).
+templ previewRow(idx int, r PreviewRow) {
+	<tr
+		data-row-idx={ fmt.Sprintf("%d", idx) }
+		class={ "cv-row cursor-pointer hover:bg-neutral-soft", rowTintClass(r) }
+	>
+		<td class="px-3 py-1.5 align-middle">
+			if r.Conflict {
+				<input type="checkbox" name="include" value={ fmt.Sprintf("%d", idx) } disabled class={ checkboxClasses }/>
+			} else {
+				<input type="checkbox" name="include" value={ fmt.Sprintf("%d", idx) } checked class={ checkboxClasses }/>
+			}
+		</td>
+		<td class="truncate px-3 py-1.5 font-mono text-xs text-secondary" title={ r.SourceFull }>{ r.Source }</td>
+		<td class="px-3 py-1.5 font-mono text-xs text-neutral-strong">{ r.CaptureDate }</td>
+		<td class="px-3 py-1.5 text-xs text-neutral">{ r.DateSource }</td>
+		<td class="truncate px-3 py-1.5 font-mono text-xs text-secondary" title={ r.DestAbs }>{ r.DestRel }</td>
+		<td class="px-3 py-1.5">
+			@statusPill(r.Status)
+		</td>
+	</tr>
+}
+
+templ statusPill(status string) {
+	switch status {
+		case "Conflict":
+			@Pill("conflict", "Conflict") {
+				@IconAlertTriangle()
+			}
+		case "Error":
+			@Pill("error", "Error") {
+				@IconAlertCircle()
+			}
+		case "mtime":
+			@Pill("info", "mtime") {
+				@IconClock()
+			}
+		default:
+			@Pill("ok", "OK")
+	}
+}
+
+templ ScanError(message string) {
+	@Layout("DateTree Photos") {
+		@PageNarrow() {
+			@Card() {
+				<div class="flex items-start gap-3">
+					<span class="text-danger">
+						@IconAlertCircle()
+					</span>
+					<div>
+						<h2 class="text-base font-semibold text-secondary">Scan failed</h2>
+						<p class="mt-1 text-sm text-neutral">{ message }</p>
+						<a href="/" class={ buttonClasses("outlined") + " mt-4" }>Back</a>
+					</div>
+				</div>
+			}
+		}
+	}
+}
+
+// ScanTemplateError is rendered when validatePathTemplate rejects cfg.PathTemplate
+// at scan-handler entry. Differs from ScanError by surfacing a /settings CTA so
+// the user can fix the corruption without hunting for the global nav.
+templ ScanTemplateError(reason string) {
+	@Layout("DateTree Photos") {
+		@PageNarrow() {
+			@Card() {
+				<div class="flex items-start gap-3">
+					<span class="text-danger">
+						@IconAlertTriangle()
+					</span>
+					<div>
+						<h2 class="text-base font-semibold text-secondary">Path template invalid</h2>
+						<p class="mt-1 text-sm text-neutral">{ reason }. Visit Settings to fix.</p>
+						<div class="mt-4 flex gap-3">
+							<a href="/" class={ buttonClasses("outlined") }>Back</a>
+							<a href="/settings" class={ buttonClasses("primary") }>Settings</a>
+						</div>
+					</div>
+				</div>
+			}
+		}
+	}
+}

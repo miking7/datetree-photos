@@ -1,0 +1,106 @@
+package components
+
+import "fmt"
+
+type ProgressModel struct {
+	Source     string
+	Dest       string
+	Mode       string
+	Processed  int
+	Total      int // -1 = indeterminate (count pass still running)
+	Current    string
+	HeadingTpl string // optional override; supports a single %s for Source. Empty = "Scanning %s..."
+	SSEPath    string // SSE endpoint path; empty defaults to /scan/events
+	CancelPath string // POST path for the Cancel button; empty defaults to /scan/cancel
+}
+
+// Heading shown above the bar.
+func (m ProgressModel) Heading() string {
+	tpl := m.HeadingTpl
+	if tpl == "" {
+		tpl = "Scanning %s..."
+	}
+	return fmt.Sprintf(tpl, m.Source)
+}
+
+func (m ProgressModel) ssePath() string {
+	if m.SSEPath != "" {
+		return m.SSEPath
+	}
+	return "/scan/events"
+}
+
+func (m ProgressModel) cancelPath() string {
+	if m.CancelPath != "" {
+		return m.CancelPath
+	}
+	return "/scan/cancel"
+}
+
+// StatusLine for the text under the bar. Mirrors what's shown when SSE updates.
+func (m ProgressModel) StatusLine() string {
+	if m.Total < 0 {
+		return "Counting files..."
+	}
+	if m.Current == "" {
+		return fmt.Sprintf("%d / %d files.", m.Processed, m.Total)
+	}
+	return fmt.Sprintf("%d / %d files. Currently: %s", m.Processed, m.Total, m.Current)
+}
+
+// PercentWidth returns the bar width as an inline style. Caps at 100% so a
+// race between an SSE message reporting Processed > Total can't overflow.
+func (m ProgressModel) PercentWidth() string {
+	if m.Total <= 0 {
+		return "0%"
+	}
+	pct := float64(m.Processed) / float64(m.Total) * 100
+	if pct > 100 {
+		pct = 100
+	}
+	return fmt.Sprintf("%.1f%%", pct)
+}
+
+// Progress is the SSE-wrapped fragment served immediately after POST /scan.
+// The inner #scan-progress div is replaced live by `event: progress` messages
+// from /scan/events, and the trailing div is replaced by `event: complete` to
+// swap in the full preview page once the scan finishes.
+templ Progress(m ProgressModel) {
+	@Layout("DateTree Photos") {
+		@PageWide() {
+			<div class="mb-6">
+				<h1 class="text-2xl font-semibold tracking-tight text-secondary">{ m.Heading() }</h1>
+				if m.Mode != "" {
+					<p class="mt-1 font-mono text-xs text-neutral">{ m.Source } → { m.Dest } ({ m.Mode })</p>
+				} else {
+					<p class="mt-1 font-mono text-xs text-neutral">{ m.Source } → { m.Dest }</p>
+				}
+			</div>
+			<div hx-ext="sse" sse-connect={ m.ssePath() } sse-close="complete">
+				@Card() {
+					<div id="scan-progress" sse-swap="progress">
+						@ProgressBody(m)
+					</div>
+					<div sse-swap="complete" hx-target="body" hx-swap="innerHTML"></div>
+					<div class="mt-5">
+						<button class={ buttonClasses("outlined") } hx-post={ m.cancelPath() } hx-target="body" hx-swap="innerHTML">Cancel</button>
+					</div>
+				}
+			</div>
+		}
+	}
+}
+
+// ProgressBody is the inner fragment that gets re-rendered via SSE.
+templ ProgressBody(m ProgressModel) {
+	if m.Total < 0 {
+		<div class="h-2 overflow-hidden rounded-full bg-neutral-soft">
+			<div class="progress-indeterminate h-full w-1/3 rounded-full bg-primary"></div>
+		</div>
+	} else {
+		<div class="h-2 overflow-hidden rounded-full bg-neutral-soft">
+			<div class="h-full rounded-full bg-primary transition-[width] duration-200 ease-out" style={ "width:" + m.PercentWidth() }></div>
+		</div>
+	}
+	<p class="mt-3 text-sm text-neutral">{ m.StatusLine() }</p>
+}

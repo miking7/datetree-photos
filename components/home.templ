@@ -1,0 +1,77 @@
+package components
+
+type HomeModel struct {
+	DefaultSource      string
+	DefaultDest        string
+	RecentSources      []string
+	RecentDestinations []string
+}
+
+templ Home(m HomeModel) {
+	@Layout("DateTree Photos") {
+		@PageNarrow() {
+			<div class="mb-8 flex flex-col items-center text-center">
+				<img src="/static/datetree-logo.png" alt="DateTree Photos - Your photos. In the right place." class="mb-4 w-full max-w-md"/>
+				<p class="text-sm text-neutral">Scan a source folder, preview planned moves, then execute.</p>
+			</div>
+			@Card() {
+				<form hx-post="/scan" hx-target="body" hx-swap="innerHTML" class="space-y-5">
+					<div class="combobox relative">
+						@FieldLabel("Source folder") {
+							@Input(templ.Attributes{
+								"type":         "text",
+								"name":         "source",
+								"placeholder":  "/path/to/source",
+								"value":        m.DefaultSource,
+								"autocomplete": "off",
+								"required":     true,
+							})
+						}
+						if len(m.RecentSources) > 0 {
+							@recentsDropdown(m.RecentSources, "source")
+						}
+					</div>
+					<div class="combobox relative">
+						@FieldLabel("Destination root") {
+							@Input(templ.Attributes{
+								"type":         "text",
+								"name":         "destination",
+								"placeholder":  "/path/to/destination",
+								"value":        m.DefaultDest,
+								"autocomplete": "off",
+								"required":     true,
+							})
+						}
+						if len(m.RecentDestinations) > 0 {
+							@recentsDropdown(m.RecentDestinations, "destination")
+						}
+					</div>
+					<div class="flex justify-end pt-2">
+						@Button("primary", templ.Attributes{"type": "submit"}) {
+							@IconScan()
+							Scan
+						}
+					</div>
+				</form>
+			}
+		}
+	}
+}
+
+// recentsDropdown is the shared :focus-within combobox. Hidden by default;
+// app.src.css unhides it when focus is within the wrapping .combobox element.
+// The fillRecent JS in Layout reads data-target to populate the right input.
+templ recentsDropdown(items []string, fieldName string) {
+	<ul class="recents absolute left-0 right-0 top-full z-10 mt-1 hidden max-h-56 overflow-y-auto rounded-lg border border-border bg-surface py-1 text-sm shadow-lg">
+		for _, s := range items {
+			<li>
+				<a
+					href="#"
+					data-target={ fieldName }
+					onclick="fillRecent(event)"
+					class="block truncate px-3 py-1.5 text-secondary hover:bg-primary-soft hover:text-primary"
+				>{ s }</a>
+			</li>
+		}
+	</ul>
+}

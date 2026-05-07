@@ -1,0 +1,52 @@
+package components
+
+// Button variants: primary, secondary, inverted, outlined, destructive.
+// Pass htmx attrs, type, name, etc. via attrs.
+templ Button(variant string, attrs templ.Attributes) {
+	<button class={ buttonClasses(variant) } { attrs... }>
+		{ children... }
+	</button>
+}
+
+// Input wraps <input> with the project's standard text-field styling.
+templ Input(attrs templ.Attributes) {
+	<input class={ inputClasses } { attrs... }/>
+}
+
+// Checkbox styled to match the rest of the form controls.
+templ Checkbox(attrs templ.Attributes) {
+	<input type="checkbox" class={ checkboxClasses } { attrs... }/>
+}
+
+// Card wraps a section in a rounded bordered surface.
+templ Card() {
+	<section class="rounded-xl border border-border bg-surface p-6 shadow-sm">
+		{ children... }
+	</section>
+}
+
+// Pill renders a status chip. tone: ok | conflict | error | info.
+templ Pill(tone string, label string) {
+	<span class={ pillClasses(tone) }>
+		{ children... }
+		{ label }
+	</span>
+}
+
+// SectionHeader renders an h3 title plus optional helper copy underneath.
+templ SectionHeader(title string, helper string) {
+	<div class="mb-4">
+		<h3 class="text-base font-semibold text-secondary">{ title }</h3>
+		if helper != "" {
+			<p class="mt-1 text-sm text-neutral">{ helper }</p>
+		}
+	</div>
+}
+
+// FieldLabel renders a label + the field's input(s) below.
+templ FieldLabel(text string) {
+	<label class="block">
+		<span class="mb-1 block text-sm font-medium text-secondary">{ text }</span>
+		{ children... }
+	</label>
+}

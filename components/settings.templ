@@ -1,0 +1,212 @@
+package components
+
+type SettingsPreset struct {
+	Label  string
+	Layout string
+}
+
+type SettingsModel struct {
+	PathTemplate         string
+	AlignMtimeToExif     bool
+	SoftMatchDestination bool
+	Presets              []SettingsPreset
+	PreviewToday         string // e.g. "2026/20260509"
+	Error                string
+}
+
+// PresetsJSON serializes the preset list for the inline preview script. The
+// template injects it into a data-* attribute so the browser parses it once,
+// keeping the server-side preset list as the single source of truth.
+func (m SettingsModel) PresetsJSON() string {
+	return presetsJSON(m.Presets)
+}
+
+// CurrentPreset returns the layout string of the matching preset, or "" if the
+// current PathTemplate doesn't match any preset (Custom).
+func (m SettingsModel) CurrentPreset() string {
+	for _, p := range m.Presets {
+		if p.Layout == m.PathTemplate {
+			return p.Layout
+		}
+	}
+	return ""
+}
+
+templ Settings(m SettingsModel) {
+	@Layout("Settings — DateTree Photos") {
+		@PageNarrow() {
+			<div class="mb-6">
+				<h1 class="text-2xl font-semibold tracking-tight text-secondary">Settings</h1>
+				<p class="mt-1 text-sm text-neutral">Configure path template and import behavior.</p>
+			</div>
+			@SettingsBanner(m)
+			<form class="settings-form space-y-6" hx-post="/settings" hx-target="#settings-banner" hx-swap="outerHTML" data-presets={ m.PresetsJSON() }>
+				@Card() {
+					@SectionHeader("Destination path template", "Build your folder layout from a Go time-format string.")
+					<div class="space-y-4">
+						<div>
+							<label for="path-template-preset" class="mb-1 block text-sm font-medium text-secondary">Preset</label>
+							<select
+								id="path-template-preset"
+								onchange="settingsPresetChange(this)"
+								class={ inputClasses }
+							>
+								for _, p := range m.Presets {
+									if p.Layout == m.CurrentPreset() {
+										<option value={ p.Layout } selected>{ p.Label }</option>
+									} else {
+										<option value={ p.Layout }>{ p.Label }</option>
+									}
+								}
+								if m.CurrentPreset() == "" {
+									<option value="" selected>Custom</option>
+								} else {
+									<option value="">Custom</option>
+								}
+							</select>
+						</div>
+						<div>
+							<label for="path-template" class="mb-1 block text-sm font-medium text-secondary">
+								Layout string
+								<span class="font-normal text-neutral">(uses the Go reference time <code class="rounded bg-neutral-soft px-1 py-0.5 font-mono text-xs">Mon Jan 2 15:04:05 MST 2006</code>)</span>
+							</label>
+							<input
+								type="text"
+								id="path-template"
+								name="pathTemplate"
+								value={ m.PathTemplate }
+								autocomplete="off"
+								oninput="settingsTemplateInput(this)"
+								required
+								class={ inputClasses + " font-mono" }
+							/>
+							<p class="mt-2 font-mono text-xs text-neutral">
+								Today's import would use: <span id="path-template-preview" class="text-secondary">{ m.PreviewToday }</span>
+							</p>
+						</div>
+					</div>
+				}
+				@Card() {
+					<label class="flex items-start gap-3">
+						if m.AlignMtimeToExif {
+							<input type="checkbox" name="alignMtimeToExif" checked class={ checkboxClasses + " mt-0.5" }/>
+						} else {
+							<input type="checkbox" name="alignMtimeToExif" class={ checkboxClasses + " mt-0.5" }/>
+						}
+						<span>
+							<span class="block text-sm font-medium text-secondary">Align file mtime to EXIF capture time on import</span>
+							<span class="mt-1 block text-sm text-neutral">When a file has an EXIF capture date that differs from its filesystem mtime, rewrite the destination file's mtime to match the EXIF date. On by default.</span>
+						</span>
+					</label>
+				}
+				@Card() {
+					<label class="flex items-start gap-3">
+						if m.SoftMatchDestination {
+							<input type="checkbox" name="softMatchDestination" checked class={ checkboxClasses + " mt-0.5" }/>
+						} else {
+							<input type="checkbox" name="softMatchDestination" class={ checkboxClasses + " mt-0.5" }/>
+						}
+						<span>
+							<span class="block text-sm font-medium text-secondary">Soft-match existing date folders by prefix</span>
+							<span class="mt-1 block text-sm text-neutral">When enabled: flags files already present in any folder whose name starts with the rendered date (e.g., "20260509" or "20260509 wedding photos") as conflicts, and routes new files into the descriptive folder when there is exactly one match. With multiple matches the importer falls back to creating the exact-named folder. On by default.</span>
+						</span>
+					</label>
+				}
+				<div class="flex justify-end gap-3">
+					<a href="/" class={ buttonClasses("outlined") }>Back</a>
+					@Button("primary", templ.Attributes{"type": "submit"}) {
+						Save
+					}
+				</div>
+			</form>
+			<script>
+				(function() {
+					const presets = JSON.parse(document.querySelector('.settings-form').dataset.presets);
+					window.settingsPresetChange = function(sel) {
+						const v = sel.value;
+						if (v) {
+							const input = document.getElementById('path-template');
+							input.value = v;
+							settingsRenderPreview(v);
+						}
+					};
+					window.settingsTemplateInput = function(input) {
+						const v = input.value;
+						const sel = document.getElementById('path-template-preset');
+						let matched = '';
+						for (const p of presets) {
+							if (p.Layout === v) { matched = v; break; }
+						}
+						sel.value = matched;
+						settingsRenderPreview(v);
+					};
+					function settingsRenderPreview(layout) {
+						const out = document.getElementById('path-template-preview');
+						if (!out) return;
+						try {
+							out.textContent = renderGoLayout(layout, new Date());
+						} catch (e) {
+							out.textContent = '(invalid layout)';
+						}
+					}
+					// Tiny client-side mirror of Go's reference-time format. Covers
+					// just the tokens listed in the validator (years, months, days,
+					// hours/minutes for the HHMM preset). Server-side preview on
+					// load is authoritative; this function keeps the live preview
+					// honest as the user types.
+					function renderGoLayout(layout, d) {
+						const pad = (n, w) => String(n).padStart(w, '0');
+						const Y = d.getFullYear();
+						const M = d.getMonth() + 1;
+						const D = d.getDate();
+						const h = d.getHours();
+						const m = d.getMinutes();
+						const monthsLong = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+						const monthsShort = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+						// Order matters: longer tokens first so "20060102" doesn't
+						// get partially eaten by "2006".
+						const repls = [
+							['20060102', `${Y}${pad(M,2)}${pad(D,2)}`],
+							['January', monthsLong[M-1]],
+							['Jan', monthsShort[M-1]],
+							['2006', String(Y)],
+							['1504', `${pad(h,2)}${pad(m,2)}`],
+							['15', pad(h,2)],
+							['04', pad(m,2)],
+							['06', String(Y).slice(-2)],
+							['01', pad(M,2)],
+							['02', pad(D,2)],
+						];
+						let out = layout;
+						// Use a placeholder pass to avoid re-replacing already-emitted digits.
+						const tokens = [];
+						for (let i = 0; i < repls.length; i++) {
+							const [tok, val] = repls[i];
+							const ph = ` ${i} `;
+							out = out.split(tok).join(ph);
+							tokens.push(val);
+						}
+						for (let i = 0; i < tokens.length; i++) {
+							out = out.split(` ${i} `).join(tokens[i]);
+						}
+						return out;
+					}
+				})();
+			</script>
+		}
+	}
+}
+
+// SettingsBanner renders the validation/error banner above the form. It is
+// htmx-swapped in place when POST /settings rejects the input, so the user
+// keeps the values they typed. On success the handler emits HX-Redirect
+// instead, which sends the browser back to home.
+templ SettingsBanner(m SettingsModel) {
+	<div id="settings-banner">
+		if m.Error != "" {
+			<div class="mb-4 rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
+				<strong class="font-semibold">Could not save.</strong> { m.Error }
+			</div>
+		}
+	</div>
+}

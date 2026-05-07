@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go run:*)",
+      "Bash(go mod:*)",
+      "Bash(go vet:*)",
+      "Bash(go fmt:*)",
+      "Bash(gofmt:*)",
+      "Bash(templ generate:*)",
+      "Bash(templ fmt:*)",
+      "Bash(make:*)",
+      "Bash(./datetree:*)"
+    ]
+  }
+}

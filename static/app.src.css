@@ -1,0 +1,110 @@
+@import "tailwindcss";
+
+/* Tailwind v4 auto-detects content, but .templ is not in the default list.
+   Scan the source files where class strings live: the templ files (which
+   contain raw class="..." attributes) and the generated _templ.go files. */
+@source "../components/**/*.templ";
+@source "../components/**/*_templ.go";
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/static/fonts/Inter-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/static/fonts/Inter-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("/static/fonts/Inter-SemiBold.woff2") format("woff2");
+}
+
+@theme {
+  --color-primary: #4F46E5;
+  --color-primary-hover: #4338CA;
+  --color-primary-soft: #EEF2FF;
+
+  --color-secondary: #1E293B;
+  --color-secondary-hover: #0F172A;
+
+  --color-tertiary: #A54100;
+  --color-tertiary-soft: #FEF1E8;
+
+  --color-neutral: #777681;
+  --color-neutral-soft: #F4F4F5;
+  --color-neutral-strong: #44434B;
+
+  --color-danger: #DC2626;
+  --color-danger-hover: #B91C1C;
+  --color-danger-soft: #FEF2F2;
+
+  --color-surface: #FFFFFF;
+  --color-canvas: #F8FAFC;
+  --color-border: #E2E8F0;
+  --color-border-strong: #CBD5E1;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "JetBrains Mono", "SF Mono", Menlo, monospace;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    color: var(--color-secondary);
+    background: var(--color-canvas);
+  }
+  body {
+    margin: 0;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* Combobox dropdown: shown only while focus is inside the .combobox wrapper.
+   Tailwind `hidden` sets display:none on the dropdown by default; this rule
+   wins on focus-within because it's an utility-equivalent block in @layer
+   utilities. */
+@layer utilities {
+  .combobox:focus-within .recents {
+    display: block;
+  }
+}
+
+/* Per-row content-visibility hint for the dense preview table. The
+   intrinsic-size matches the target row height so the scrollbar is sized
+   correctly without measuring offscreen rows. Defined here (not as a
+   utility class string) because it ships paired with the row-tint classes. */
+@utility cv-row {
+  content-visibility: auto;
+  contain-intrinsic-size: 0 32px;
+}
+
+/* Status-row tints. Applied via JS toggle (row-selected) and templ
+   conditional (row-conflict, row-error). Wins over hover and zebra. */
+@utility row-conflict {
+  background: var(--color-tertiary-soft);
+}
+@utility row-error {
+  background: var(--color-danger-soft);
+}
+@utility row-selected {
+  background: var(--color-primary-soft) !important;
+}
+
+/* Indeterminate progress bar: a 1/3-width pill that slides left-to-right. The
+   parent `<div class="overflow-hidden">` clips it on the way in and out. */
+@keyframes progress-indeterminate {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+.progress-indeterminate {
+  animation: progress-indeterminate 1.4s ease-in-out infinite;
+}
