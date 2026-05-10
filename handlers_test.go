@@ -575,3 +575,188 @@ func TestHandleExecute_NoneCheckedRendersError(t *testing.T) {
 		t.Errorf("execute slot should not be claimed when nothing was selected")
 	}
 }
+
+// withFakeRevealExec swaps revealExec for the duration of t and restores it
+// on cleanup. The capture closure records (path, isFile) so each test can
+// assert the call shape without spawning a real Finder/xdg-open.
+func withFakeRevealExec(t *testing.T) *struct {
+	called bool
+	path   string
+	isFile bool
+} {
+	t.Helper()
+	rec := &struct {
+		called bool
+		path   string
+		isFile bool
+	}{}
+	prior := revealExec
+	revealExec = func(path string, isFile bool) error {
+		rec.called = true
+		rec.path = path
+		rec.isFile = isFile
+		return nil
+	}
+	t.Cleanup(func() { revealExec = prior })
+	return rec
+}
+
+func postReveal(path, kind string) *httptest.ResponseRecorder {
+	form := url.Values{}
+	form.Set("path", path)
+	form.Set("kind", kind)
+	req := httptest.NewRequest(http.MethodPost, "/reveal", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	rec := httptest.NewRecorder()
+	handleReveal(rec, req)
+	return rec
+}
+
+func TestHandleReveal_HappyPathSourceFile(t *testing.T) {
+	resetSession()
+	tmp := t.TempDir()
+	srcDir := filepath.Join(tmp, "src")
+	dstDir := filepath.Join(tmp, "dst")
+	srcFile := filepath.Join(srcDir, "IMG.jpg")
+	writeFile(t, srcFile, "x")
+	current.Set([]PlannedMove{{Source: srcFile}}, srcDir, dstDir, "")
+
+	exec := withFakeRevealExec(t)
+	rec := postReveal(srcFile, "source")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%q", rec.Code, rec.Body.String())
+	}
+	if !exec.called {
+		t.Fatalf("revealExec was not called")
+	}
+	if exec.path != srcFile || !exec.isFile {
+		t.Errorf("call shape: path=%q isFile=%v, want path=%q isFile=true", exec.path, exec.isFile, srcFile)
+	}
+}
+
+func TestHandleReveal_DestFileRevealsAsFile(t *testing.T) {
+	resetSession()
+	tmp := t.TempDir()
+	srcDir := filepath.Join(tmp, "src")
+	dstDir := filepath.Join(tmp, "dst")
+	dayDir := filepath.Join(dstDir, "2024", "20240101")
+	destFile := filepath.Join(dayDir, "IMG.jpg")
+	if err := os.MkdirAll(dayDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	writeFile(t, destFile, "x")
+	current.Set([]PlannedMove{{DestAbs: destFile}}, srcDir, dstDir, "")
+
+	exec := withFakeRevealExec(t)
+	rec := postReveal(destFile, "dest")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%q", rec.Code, rec.Body.String())
+	}
+	if !exec.called || exec.path != destFile || !exec.isFile {
+		t.Errorf("call shape: path=%q isFile=%v, want path=%q isFile=true", exec.path, exec.isFile, destFile)
+	}
+}
+
+// Typical OK-row case: the dest file hasn't been written yet but its parent
+// directory exists. The handler falls back to revealing the parent folder.
+func TestHandleReveal_DestMissingFallsBackToParent(t *testing.T) {
+	resetSession()
+	tmp := t.TempDir()
+	srcDir := filepath.Join(tmp, "src")
+	dstDir := filepath.Join(tmp, "dst")
+	dayDir := filepath.Join(dstDir, "2024", "20240101")
+	if err := os.MkdirAll(dayDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	missing := filepath.Join(dayDir, "IMG.jpg")
+	current.Set([]PlannedMove{{DestAbs: missing}}, srcDir, dstDir, "")
+
+	exec := withFakeRevealExec(t)
+	rec := postReveal(missing, "dest")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%q", rec.Code, rec.Body.String())
+	}
+	if !exec.called || exec.path != dayDir || exec.isFile {
+		t.Errorf("call shape: path=%q isFile=%v, want path=%q isFile=false", exec.path, exec.isFile, dayDir)
+	}
+}
+
+func TestHandleReveal_HappyPathDestDir(t *testing.T) {
+	resetSession()
+	tmp := t.TempDir()
+	srcDir := filepath.Join(tmp, "src")
+	dstDir := filepath.Join(tmp, "dst")
+	dayDir := filepath.Join(dstDir, "2024", "20240101")
+	if err := os.MkdirAll(dayDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	current.Set([]PlannedMove{{DestAbs: filepath.Join(dayDir, "IMG.jpg")}}, srcDir, dstDir, "")
+
+	exec := withFakeRevealExec(t)
+	rec := postReveal(dayDir, "dest")
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204; body=%q", rec.Code, rec.Body.String())
+	}
+	if !exec.called || exec.path != dayDir || exec.isFile {
+		t.Errorf("call shape: path=%q isFile=%v, want path=%q isFile=false", exec.path, exec.isFile, dayDir)
+	}
+}
+
+func TestHandleReveal_RejectsTraversal(t *testing.T) {
+	resetSession()
+	tmp := t.TempDir()
+	srcDir := filepath.Join(tmp, "src")
+	dstDir := filepath.Join(tmp, "dst")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	current.Set([]PlannedMove{{Source: filepath.Join(srcDir, "IMG.jpg")}}, srcDir, dstDir, "")
+
+	exec := withFakeRevealExec(t)
+	// Concatenate with a literal '..' segment so the un-Cleaned form survives
+	// to the handler. filepath.Join would collapse it before transmission.
+	bad := srcDir + string(filepath.Separator) + ".." + string(filepath.Separator) + "secret"
+	rec := postReveal(bad, "source")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%q", rec.Code, rec.Body.String())
+	}
+	if exec.called {
+		t.Errorf("revealExec must not be invoked on traversal reject")
+	}
+}
+
+func TestHandleReveal_RejectsOutsideRoots(t *testing.T) {
+	resetSession()
+	tmp := t.TempDir()
+	srcDir := filepath.Join(tmp, "src")
+	dstDir := filepath.Join(tmp, "dst")
+	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// A real, existing path outside both roots — different temp dir.
+	other := t.TempDir()
+	otherFile := filepath.Join(other, "leak.txt")
+	writeFile(t, otherFile, "x")
+	current.Set([]PlannedMove{{Source: filepath.Join(srcDir, "IMG.jpg")}}, srcDir, dstDir, "")
+
+	exec := withFakeRevealExec(t)
+	rec := postReveal(otherFile, "source")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%q", rec.Code, rec.Body.String())
+	}
+	if exec.called {
+		t.Errorf("revealExec must not be invoked for out-of-roots path")
+	}
+}
+
+func TestHandleReveal_RejectsWhenNoLiveScan(t *testing.T) {
+	resetSession()
+	exec := withFakeRevealExec(t)
+	rec := postReveal("/tmp/whatever", "source")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body=%q", rec.Code, rec.Body.String())
+	}
+	if exec.called {
+		t.Errorf("revealExec must not be invoked without an active scan")
+	}
+}

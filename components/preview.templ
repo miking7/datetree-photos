@@ -11,6 +11,7 @@ type PreviewRow struct {
 	DestAbs     string
 	Conflict    bool
 	HasError    bool
+	HasDestDir  bool   // dest folder exists on disk; gates the dest-reveal button
 	Status      string // "OK" | "Conflict" | "Error" | "mtime"
 }
 
@@ -22,6 +23,7 @@ type PreviewModel struct {
 	MtimeFallbacks int
 	Errors         int
 	Rows           []PreviewRow
+	IsMacOS        bool // controls the reveal-button tooltip wording per platform
 }
 
 func (m PreviewModel) Summary() string {
@@ -92,7 +94,7 @@ templ Preview(m PreviewModel) {
 							</thead>
 							<tbody class="divide-y divide-border">
 								for i, r := range m.Rows {
-									@previewRow(i, r)
+									@previewRow(i, r, m.IsMacOS)
 								}
 							</tbody>
 						</table>
@@ -165,7 +167,7 @@ templ Preview(m PreviewModel) {
 // previewRow renders one tr. Tint classes are applied directly so the row
 // reads correctly regardless of selection state (row-selected wins via
 // !important in app.src.css).
-templ previewRow(idx int, r PreviewRow) {
+templ previewRow(idx int, r PreviewRow, isMacOS bool) {
 	<tr
 		data-row-idx={ fmt.Sprintf("%d", idx) }
 		class={ "cv-row cursor-pointer hover:bg-neutral-soft", rowTintClass(r) }
@@ -177,14 +179,55 @@ templ previewRow(idx int, r PreviewRow) {
 				<input type="checkbox" name="include" value={ fmt.Sprintf("%d", idx) } checked class={ checkboxClasses }/>
 			}
 		</td>
-		<td class="truncate px-3 py-1.5 font-mono text-xs text-secondary" title={ r.SourceFull }>{ r.Source }</td>
+		<td class="px-3 py-1.5 font-mono text-xs text-secondary" title={ r.SourceFull }>
+			<div class="flex min-w-0 items-center">
+				<span class="truncate">{ r.Source }</span>
+				@revealButton(r.SourceFull, "source", true, isMacOS)
+			</div>
+		</td>
 		<td class="px-3 py-1.5 font-mono text-xs text-neutral-strong">{ r.CaptureDate }</td>
 		<td class="px-3 py-1.5 text-xs text-neutral">{ r.DateSource }</td>
-		<td class="truncate px-3 py-1.5 font-mono text-xs text-secondary" title={ r.DestAbs }>{ r.DestRel }</td>
+		<td class="px-3 py-1.5 font-mono text-xs text-secondary" title={ r.DestAbs }>
+			<div class="flex min-w-0 items-center">
+				<span class="truncate">{ r.DestRel }</span>
+				@revealButton(r.DestAbs, "dest", r.HasDestDir, isMacOS)
+			</div>
+		</td>
 		<td class="px-3 py-1.5">
 			@statusPill(r.Status)
 		</td>
 	</tr>
+}
+
+// revealButton renders the per-row Reveal-in-file-manager icon. Disabled state
+// is used for the dest button when the folder does not yet exist on disk;
+// onclick stops propagation so the row range-select handler never fires.
+templ revealButton(path, kind string, enabled, isMacOS bool) {
+	if enabled {
+		<button
+			type="button"
+			hx-post="/reveal"
+			hx-vals={ revealHXVals(path, kind) }
+			hx-swap="none"
+			onclick="event.stopPropagation()"
+			title={ revealTooltip(isMacOS) }
+			aria-label={ revealTooltip(isMacOS) }
+			class={ revealBtnClasses(true) }
+		>
+			@IconReveal()
+		</button>
+	} else {
+		<button
+			type="button"
+			disabled
+			onclick="event.stopPropagation()"
+			title="Folder will be created on Execute"
+			aria-label="Folder will be created on Execute"
+			class={ revealBtnClasses(false) }
+		>
+			@IconReveal()
+		</button>
+	}
 }
 
 templ statusPill(status string) {

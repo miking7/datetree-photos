@@ -107,6 +107,7 @@ func newMux() *http.ServeMux {
 	mux.HandleFunc("/execute/events", handleExecuteEvents)
 	mux.HandleFunc("/execute/cancel", handleExecuteCancel)
 	mux.HandleFunc("/settings", handleSettings)
+	mux.HandleFunc("/reveal", handleReveal)
 	mux.HandleFunc("/runs/", handleManifest)
 	mux.HandleFunc("/update/check", handleUpdateCheck)
 	mux.HandleFunc("/update/apply", handleUpdateApply)

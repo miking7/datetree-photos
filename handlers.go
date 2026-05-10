@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -300,11 +301,15 @@ func filterIncluded(moves []PlannedMove, raw []string) []PlannedMove {
 
 func buildPreviewModel(moves []PlannedMove, source, dest string) components.PreviewModel {
 	m := components.PreviewModel{
-		Source: source,
-		Dest:   dest,
-		Total:  len(moves),
+		Source:  source,
+		Dest:    dest,
+		Total:   len(moves),
+		IsMacOS: runtime.GOOS == "darwin",
 	}
 	m.Rows = make([]components.PreviewRow, 0, len(moves))
+	// Cache parent-dir existence: many rows share a parent (same capture day),
+	// so a per-distinct-dir stat keeps O(N) row construction cheap.
+	dirSeen := make(map[string]bool)
 	for _, mv := range moves {
 		if mv.Conflict {
 			m.Conflicts++
@@ -326,6 +331,13 @@ func buildPreviewModel(moves []PlannedMove, source, dest string) components.Prev
 		case mv.DateSource == DateSourceMtime:
 			status = "mtime"
 		}
+		destDir := filepath.Dir(mv.DestAbs)
+		hasDir, ok := dirSeen[destDir]
+		if !ok {
+			info, err := os.Stat(destDir)
+			hasDir = err == nil && info.IsDir()
+			dirSeen[destDir] = hasDir
+		}
 		m.Rows = append(m.Rows, components.PreviewRow{
 			Source:      filepath.Base(mv.Source),
 			SourceFull:  mv.Source,
@@ -335,6 +347,7 @@ func buildPreviewModel(moves []PlannedMove, source, dest string) components.Prev
 			DestAbs:     mv.DestAbs,
 			Conflict:    mv.Conflict,
 			HasError:    mv.Error != "",
+			HasDestDir:  hasDir,
 			Status:      status,
 		})
 	}
@@ -826,6 +839,97 @@ func handleQuit(w http.ResponseWriter, r *http.Request) {
 			_ = httpListener.Close()
 		}
 	}()
+}
+
+// revealExec is the platform-dispatch indirection. Tests swap it to assert the
+// call shape without spawning a real Finder/xdg-open process.
+var revealExec = RevealInFileManager
+
+func handleReveal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "could not parse form", http.StatusBadRequest)
+		return
+	}
+	path := r.FormValue("path")
+	kind := r.FormValue("kind")
+	if path == "" || !filepath.IsAbs(path) || strings.Contains(path, "..") {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	if kind != "source" && kind != "dest" {
+		http.Error(w, "invalid kind", http.StatusBadRequest)
+		return
+	}
+
+	// Authorisation: the path must descend from the live session's source or
+	// destination root. Without an active scan there is nothing to authorise
+	// against, so reject. Reading from Snapshot covers the post-scan preview;
+	// the running scan's roots are the same once StartScan has set them.
+	_, source, dest, _ := current.Snapshot()
+	if source == "" && dest == "" {
+		if rs := current.RunningScan(); rs != nil {
+			source, dest = rs.Source, rs.Dest
+		}
+	}
+	if source == "" && dest == "" {
+		http.Error(w, "no active scan", http.StatusBadRequest)
+		return
+	}
+
+	cleaned := filepath.Clean(path)
+	if !pathUnderRoot(cleaned, source) && !pathUnderRoot(cleaned, dest) {
+		http.Error(w, "path outside scan roots", http.StatusBadRequest)
+		return
+	}
+
+	// Source paths point at the just-scanned file. Dest paths point at the
+	// planned destination *file*; for typical OK rows that file hasn't been
+	// written yet, in which case the UI gated on the parent dir existing
+	// (HasDestDir) and we open that instead — closest equivalent to revealing
+	// the file.
+	info, err := os.Stat(cleaned)
+	if err != nil {
+		if kind == "dest" && os.IsNotExist(err) {
+			parent := filepath.Dir(cleaned)
+			pinfo, perr := os.Stat(parent)
+			if perr != nil {
+				http.Error(w, "path does not exist", http.StatusBadRequest)
+				return
+			}
+			cleaned = parent
+			info = pinfo
+		} else {
+			http.Error(w, "path does not exist", http.StatusBadRequest)
+			return
+		}
+	}
+	isFile := !info.IsDir()
+
+	if err := revealExec(cleaned, isFile); err != nil {
+		log.Printf("reveal: %v", err)
+		http.Error(w, "reveal failed", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// pathUnderRoot reports whether path lies inside root. Empty root never
+// matches; this protects against a half-initialised session where one root is
+// blank.
+func pathUnderRoot(path, root string) bool {
+	if root == "" {
+		return false
+	}
+	root = filepath.Clean(root)
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // handleManifest serves a previously-written manifest CSV. Path-traversal is

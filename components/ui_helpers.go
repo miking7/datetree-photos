@@ -1,5 +1,7 @@
 package components
 
+import "encoding/json"
+
 const buttonBase = "inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas disabled:cursor-not-allowed disabled:opacity-50"
 
 func buttonClasses(variant string) string {
@@ -32,6 +34,34 @@ func rowTintClass(r PreviewRow) string {
 		return "row-conflict"
 	}
 	return ""
+}
+
+// revealBtnClasses styles the small inline reveal button so it sits flush with
+// adjacent text and reads as a low-emphasis affordance rather than a primary
+// action.
+func revealBtnClasses(enabled bool) string {
+	const base = "ml-1.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-neutral transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+	if enabled {
+		return base + " hover:bg-neutral-soft hover:text-secondary"
+	}
+	return base + " cursor-not-allowed opacity-40"
+}
+
+// revealHXVals encodes the hx-vals JSON payload. json.Marshal handles the
+// quoting/escaping so user-supplied paths can't break the attribute.
+func revealHXVals(path, kind string) string {
+	b, err := json.Marshal(map[string]string{"path": path, "kind": kind})
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
+func revealTooltip(isMacOS bool) string {
+	if isMacOS {
+		return "Reveal in Finder"
+	}
+	return "Show in file manager"
 }
 
 func pillClasses(tone string) string {

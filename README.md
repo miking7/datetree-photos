@@ -2,36 +2,11 @@
 
 ![DateTree Photos - Your photos. In the right place.](static/datetree-logo.png)
 
-*your photos in the right place*
+*YOUR PHOTOS. IN THE RIGHT PLACE.*
 
 Local web UI for importing camera SD cards into a date-organized library. Single static Go binary; macOS and Linux.
 
 Repository: <https://github.com/miking7/datetree-photos>
-
-## Status
-
-v1 milestones:
-
-- [x] Project scaffold + Claude Code config
-- [x] HTTP server, embedded static assets, templ home page
-- [x] Scan handler: walk source, read EXIF/QuickTime/mtime dates, render preview
-- [x] Async scan with SSE progress + Cancel button
-- [x] Execute / mover (move-or-rename, cross-FS copy-and-verify)
-- [x] Run manifest CSV
-- [x] Settings persistence (recent paths MRU, last mode)
-- [x] Done screen with run summary and manifest link
-- [x] Per-row checkbox state plumbing in preview (with range-select + bulk tick/untick)
-- [x] Settings page with three persisted toggles (path template, align-mtime, soft-match)
-- [x] Path template and soft-match wired through scan; align-mtime consumption pending
-
-v2 will add dedup against destination library — see spec §12.
-
-## Why this exists
-
-Replaces the older `~/bin/import_photos` bash/AppleScript pipeline. Reads real
-EXIF and QuickTime capture dates instead of leaning on file mtime, so files
-land under the date the photo was actually taken. Pure-Go single binary — no
-Python, no virtualenv, no `exiftool` dependency.
 
 ## Install
 
