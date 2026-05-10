@@ -147,9 +147,11 @@ func TestConfigRecordRunIgnoresEmptyPaths(t *testing.T) {
 func TestConfigSettingsRoundTrip(t *testing.T) {
 	redirectConfig(t)
 	want := Config{
-		PathTemplate:         "2006/01/02",
-		AlignMtimeToExif:     true,
-		SoftMatchDestination: true,
+		PathTemplate:           "2006/01/02",
+		AlignMtimeToExif:       true,
+		SoftMatchDestination:   true,
+		UpdateChecksEnabled:    false,
+		DismissedUpdateVersion: "v0.1.1",
 	}
 	if err := want.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
@@ -166,6 +168,12 @@ func TestConfigSettingsRoundTrip(t *testing.T) {
 	}
 	if got.SoftMatchDestination != want.SoftMatchDestination {
 		t.Errorf("SoftMatchDestination: got %v, want %v", got.SoftMatchDestination, want.SoftMatchDestination)
+	}
+	if got.UpdateChecksEnabled != want.UpdateChecksEnabled {
+		t.Errorf("UpdateChecksEnabled: got %v, want %v", got.UpdateChecksEnabled, want.UpdateChecksEnabled)
+	}
+	if got.DismissedUpdateVersion != want.DismissedUpdateVersion {
+		t.Errorf("DismissedUpdateVersion: got %q, want %q", got.DismissedUpdateVersion, want.DismissedUpdateVersion)
 	}
 }
 
@@ -195,6 +203,12 @@ func TestConfigLoadOlderStateFile(t *testing.T) {
 	}
 	if !got.SoftMatchDestination {
 		t.Errorf("SoftMatchDestination: expected true on missing field, got false")
+	}
+	if !got.UpdateChecksEnabled {
+		t.Errorf("UpdateChecksEnabled: expected true on missing field, got false")
+	}
+	if got.DismissedUpdateVersion != "" {
+		t.Errorf("DismissedUpdateVersion: expected empty on missing field, got %q", got.DismissedUpdateVersion)
 	}
 	// Ensure the older fields still round-tripped intact.
 	if len(got.RecentSources) != 1 || got.RecentSources[0] != "/Volumes/SDCARD/DCIM" {

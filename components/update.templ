@@ -1,0 +1,206 @@
+package components
+
+import "fmt"
+
+type UpdateProgressModel struct {
+	TargetTag string
+	Phase     string // "downloading", "verifying", "extracting", "applying"
+	Processed int
+	Total     int
+}
+
+// PhaseLabel turns the internal phase token into a display string. Kept as a
+// method so the templ doesn't need a switch.
+func (m UpdateProgressModel) PhaseLabel() string {
+	switch m.Phase {
+	case "downloading":
+		if m.Total > 0 {
+			return fmt.Sprintf("Downloading %s of %s", humanBytes(m.Processed), humanBytes(m.Total))
+		}
+		if m.Processed > 0 {
+			return fmt.Sprintf("Downloading %s", humanBytes(m.Processed))
+		}
+		return "Downloading"
+	case "verifying":
+		return "Verifying SHA256"
+	case "extracting":
+		return "Extracting"
+	case "applying":
+		return "Applying"
+	default:
+		return "Working"
+	}
+}
+
+func humanBytes(n int) string {
+	if n < 1024 {
+		return fmt.Sprintf("%d B", n)
+	}
+	if n < 1024*1024 {
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	}
+	return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
+}
+
+// UpdateBanner sits between header and main; rendered for every page when
+// CurrentBanner() is non-empty. Click "Update" to start the apply flow on the
+// main pane; click "Dismiss" to suppress the banner for this version (and
+// future launches until a newer one ships).
+templ UpdateBanner(tag string) {
+	<div id="update-banner" class="border-b border-primary/30 bg-primary-soft">
+		<div class="mx-auto flex max-w-7xl items-center justify-between px-6 py-2 text-sm">
+			<span class="text-secondary">Version { tag } is available.</span>
+			<span class="flex items-center gap-2">
+				<button
+					type="button"
+					hx-post="/update/apply"
+					hx-target="main"
+					hx-swap="innerHTML"
+					class={ buttonClasses("primary") + " text-xs px-3 py-1" }
+				>Update</button>
+				<button
+					type="button"
+					hx-post="/update/dismiss"
+					hx-target="#update-banner"
+					hx-swap="outerHTML"
+					class={ buttonClasses("outlined") + " text-xs px-3 py-1" }
+				>Dismiss</button>
+			</span>
+		</div>
+	</div>
+}
+
+// EmptyBanner is the htmx swap target after dismiss — replaces the banner
+// element with an empty placeholder so re-renders won't re-summon the banner
+// for this dismissed version.
+templ EmptyBanner() {
+	<div id="update-banner"></div>
+}
+
+// UpdatesCard is the Settings page card. The "Check for updates" and "Update
+// to vX" buttons are type=button so they bypass the parent form's submit and
+// post directly to the update endpoints.
+templ UpdatesCard(m SettingsModel) {
+	<div id="update-card">
+		@Card() {
+			@SectionHeader("Updates", "Check for new releases on GitHub.")
+			<div class="space-y-4">
+				<div class="text-sm text-secondary">
+					<div>Current version: <span class="font-mono">{ m.Version }</span></div>
+					<div>Last checked: <span class="text-neutral">{ m.LastCheckedDisplay() }</span></div>
+					if m.UpdateError != "" {
+						<div class="mt-2 rounded-lg border border-danger/30 bg-danger-soft px-3 py-2 text-danger">{ m.UpdateError }</div>
+					}
+				</div>
+				if m.UpdateAvailable {
+					<div class="rounded-lg border border-primary/30 bg-primary-soft px-3 py-2 text-sm">
+						<div>Version <span class="font-mono">{ m.LatestTag }</span> is available.</div>
+						<div class="mt-2 flex items-center gap-3">
+							<button
+								type="button"
+								hx-post="/update/apply"
+								hx-target="main"
+								hx-swap="innerHTML"
+								class={ buttonClasses("primary") + " text-xs px-3 py-1" }
+							>Update to { m.LatestTag }</button>
+							<a href={ templ.URL(m.ReleaseNotesURL()) } target="_blank" rel="noopener" class="text-xs text-primary underline">Release notes</a>
+						</div>
+					</div>
+				} else if m.LatestTag != "" {
+					<div class="text-sm text-neutral">You are on the latest version.</div>
+				}
+				<div class="flex items-center gap-3">
+					<button
+						type="button"
+						hx-post="/update/check"
+						hx-target="#update-card"
+						hx-swap="outerHTML"
+						class={ buttonClasses("outlined") + " text-xs px-3 py-1" }
+					>Check for updates</button>
+				</div>
+				<label class="flex items-start gap-3">
+					if m.UpdateChecksEnabled {
+						<input type="checkbox" name="updateChecksEnabled" checked class={ checkboxClasses + " mt-0.5" }/>
+					} else {
+						<input type="checkbox" name="updateChecksEnabled" class={ checkboxClasses + " mt-0.5" }/>
+					}
+					<span>
+						<span class="block text-sm font-medium text-secondary">Automatically check for updates on launch</span>
+						<span class="mt-1 block text-sm text-neutral">Issues one HTTPS request to api.github.com at startup. Off-by-default disables both the launch check and the at-startup banner; manual "Check for updates" still works.</span>
+					</span>
+				</label>
+			</div>
+		}
+	</div>
+}
+
+// UpdateProgress is the initial page swap after clicking Update. It opens an
+// SSE connection to /update/events; the body is replaced by ProgressBody on
+// each progress event and by UpdateDone or UpdateError on the complete event.
+templ UpdateProgress(m UpdateProgressModel) {
+	@Layout("Updating — DateTree Photos") {
+		@PageNarrow() {
+			<div hx-ext="sse" sse-connect="/update/events" sse-swap="progress,complete" hx-swap="innerHTML">
+				@UpdateProgressBody(m)
+			</div>
+		}
+	}
+}
+
+templ UpdateProgressBody(m UpdateProgressModel) {
+	<div class="space-y-4">
+		<h1 class="text-2xl font-semibold tracking-tight text-secondary">Updating to { m.TargetTag }</h1>
+		<p class="text-sm text-neutral">{ m.PhaseLabel() }</p>
+		if m.Phase == "downloading" && m.Total > 0 {
+			<div class="h-2 w-full overflow-hidden rounded bg-neutral-soft">
+				<div class="h-full bg-primary" style={ progressBarStyle(m.Processed, m.Total) }></div>
+			</div>
+		}
+	</div>
+}
+
+func progressBarStyle(processed, total int) string {
+	if total <= 0 {
+		return "width: 0%"
+	}
+	pct := float64(processed) / float64(total) * 100
+	if pct > 100 {
+		pct = 100
+	}
+	return fmt.Sprintf("width: %.1f%%", pct)
+}
+
+templ UpdateDone(tag string) {
+	<div class="space-y-4">
+		<h1 class="text-2xl font-semibold tracking-tight text-secondary">Update applied</h1>
+		<p class="text-sm text-secondary">Version { tag } has been written to disk. The currently-running process is still the old version — restart datetree to pick up the new one.</p>
+		<div class="flex gap-3">
+			<button
+				type="button"
+				hx-post="/quit"
+				hx-target="main"
+				hx-swap="innerHTML"
+				class={ buttonClasses("primary") }
+			>Quit now</button>
+			<a href="/" class={ buttonClasses("outlined") }>Back to home</a>
+		</div>
+	</div>
+}
+
+templ UpdateError(message string) {
+	<div class="space-y-4">
+		<h1 class="text-2xl font-semibold tracking-tight text-secondary">Update failed</h1>
+		<div class="rounded-lg border border-danger/30 bg-danger-soft px-4 py-3 text-sm text-danger">
+			{ message }
+		</div>
+		<p class="text-sm text-neutral">If this is a permission error, check that the binary lives at <code class="font-mono">~/.local/bin/datetree</code>. Read-only install paths cannot be self-updated; reinstall via <code class="font-mono">install.sh</code>.</p>
+		<a href="/" class={ buttonClasses("outlined") }>Back to home</a>
+	</div>
+}
+
+templ QuitGoodbye() {
+	<div class="space-y-4">
+		<h1 class="text-2xl font-semibold tracking-tight text-secondary">datetree shut down</h1>
+		<p class="text-sm text-neutral">You can close this tab. Re-run <code class="font-mono">datetree</code> from your terminal to launch the new version.</p>
+	</div>
+}

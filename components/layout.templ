@@ -40,6 +40,9 @@ templ Layout(title string) {
 					</a>
 				</div>
 			</header>
+			if tag := CurrentBanner(); tag != "" {
+				@UpdateBanner(tag)
+			}
 			<main>
 				{ children... }
 			</main>

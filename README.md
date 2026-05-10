@@ -46,8 +46,17 @@ release's `checksums.txt`, and installs `datetree` to `~/.local/bin/`. If
 `~/.local/bin` is not on your `$PATH`, the script prints a one-line hint to
 add it to your shell rc.
 
-Updates are not yet automatic — re-run the same command to upgrade.
-Self-update is on the roadmap.
+Updates are checked automatically on launch. When a newer release is detected,
+a banner appears in the UI; clicking Update downloads the matching archive,
+verifies its SHA256 against the release's `checksums.txt`, and replaces the
+running binary in place. The currently-running process is not auto-restarted
+— after applying, restart `datetree` to pick up the new version. Auto-checks
+can be disabled from the Settings page; manual "Check for updates" still
+works when disabled. `dev` builds (built without a tag) never check.
+
+**Trust model.** Auto-update fetches binaries from GitHub Releases and
+verifies SHA256 checksums. The binaries are not code-signed; you are
+trusting GitHub Releases for the `miking7/datetree-photos` repository.
 
 **macOS Gatekeeper.** Binaries fetched via `curl` are typically free of the
 quarantine xattr, so the "developer cannot be verified" dialog should not

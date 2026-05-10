@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"embed"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -25,6 +27,11 @@ const (
 // Overridden at link time via -ldflags "-X main.version=...". "dev" is the local-build sentinel.
 var version = "dev"
 
+// httpListener is captured at startup so handleQuit can close it to unblock
+// http.Serve and let main return cleanly. Closing the listener (rather than
+// os.Exit) lets in-flight Config.Save calls finish.
+var httpListener net.Listener
+
 func main() {
 	port := flag.Int("port", 0, "explicit port (0 = pick free in 9700-9799)")
 	noOpen := flag.Bool("no-open", false, "don't auto-open browser")
@@ -42,6 +49,7 @@ func main() {
 		fmt.Println("error:", err)
 		return
 	}
+	httpListener = listener
 
 	url := fmt.Sprintf("http://%s/", listener.Addr().String())
 	fmt.Println(url)
@@ -51,8 +59,17 @@ func main() {
 		go func() { _ = openBrowser(url) }()
 	}
 
+	// Best-effort launch-time update check. Goroutine isolates a slow or
+	// failing GitHub fetch from server startup; the result, if any, is
+	// surfaced via components.SetBanner.
+	if cfg, lerr := LoadConfig(); lerr == nil {
+		go updater.RunCheckIfEnabled(context.Background(), cfg)
+	}
+
 	mux := newMux()
-	if err := http.Serve(listener, mux); err != nil {
+	if err := http.Serve(listener, mux); err != nil && !errors.Is(err, net.ErrClosed) {
+		// net.ErrClosed is the expected exit when handleQuit closes the
+		// listener; only surface unexpected errors.
 		fmt.Println("server error:", err)
 	}
 }
@@ -91,6 +108,11 @@ func newMux() *http.ServeMux {
 	mux.HandleFunc("/execute/cancel", handleExecuteCancel)
 	mux.HandleFunc("/settings", handleSettings)
 	mux.HandleFunc("/runs/", handleManifest)
+	mux.HandleFunc("/update/check", handleUpdateCheck)
+	mux.HandleFunc("/update/apply", handleUpdateApply)
+	mux.HandleFunc("/update/events", handleUpdateEvents)
+	mux.HandleFunc("/update/dismiss", handleUpdateDismiss)
+	mux.HandleFunc("/quit", handleQuit)
 
 	// Serve from the embedded FS rooted at /static/.
 	staticSub, err := fs.Sub(staticFS, "static")

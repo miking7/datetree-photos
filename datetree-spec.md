@@ -227,11 +227,15 @@ Toggle off: behaviour is unchanged from v1 — the rendered leaf is used verbati
   "lastMode": "move",
   "pathTemplate": "2006/20060102",                    // Go time-format layout
   "alignMtimeToExif": true,                           // Settings toggle
-  "softMatchDestination": true                        // Settings toggle
+  "softMatchDestination": true,                       // Settings toggle
+  "updateChecksEnabled": true,                        // Settings toggle
+  "dismissedUpdateVersion": ""                        // tag the user dismissed the banner for
 }
 ```
 
-Loaded on startup; rewritten after each successful run and on every Settings save. Older state.json files predating the settings fields load with defaults: `pathTemplate` becomes `2006/20060102` (preserves v1 behaviour), and the two booleans default to true. Recents/last-mode keep their existing semantics. `softMatchDestination` is wired into the scan loop (§7), so the preview reflects the resolved destination and conflict signal. `alignMtimeToExif` consumption lands in a follow-up task.
+Loaded on startup; rewritten after each successful run and on every Settings save. Older state.json files predating the settings fields load with defaults: `pathTemplate` becomes `2006/20060102` (preserves v1 behaviour), and the booleans default to true. Recents/last-mode keep their existing semantics. `softMatchDestination` is wired into the scan loop (§7), so the preview reflects the resolved destination and conflict signal. `alignMtimeToExif` consumption lands in a follow-up task.
+
+**Updates.** When `updateChecksEnabled` is true (default), the binary issues one HTTPS GET to `https://api.github.com/repos/miking7/datetree-photos/releases/latest` at startup and compares the returned `tag_name` to the baked-in version. When newer (and not equal to `dismissedUpdateVersion`), a dismissible banner is rendered on every page; clicking Update fetches the matching `datetree_<goos>_<goarch>.tar.gz` and `checksums.txt` from the release, verifies SHA256 against the listed digest, extracts the binary, and hands the bytes to `github.com/minio/selfupdate`. After a successful apply, the running process is unchanged — the user must restart `datetree` to pick up the new version. `dev` builds skip the check entirely. Dismiss writes the tag into `dismissedUpdateVersion`; the banner re-appears for any later release. Toggle off disables only the launch-time check — manual "Check for updates" from the Settings page still works.
 
 `pathTemplate` is wired through to the scanner: `Scan(ctx, source, dest, template, softMatch, reporter)` renders each `DestRel` via `time.Format(template, captureDate)`. The scan handler calls `validatePathTemplate(cfg.PathTemplate)` before walking, so the user's chosen template actually takes effect on the next import — and a corrupt template surfaces as a UI error rather than misrouting files.
 
@@ -320,8 +324,8 @@ CLI flags:
 ## 13. Out of scope (v1)
 
 - Authentication / multi-user
-- Network access (only `127.0.0.1`)
-- Settings UI — partial. **In scope** for v1: destination path template, align-mtime-to-EXIF toggle, soft-match destination folders toggle. Path template and soft-match are wired through the scan path; align-mtime consumption is the remaining follow-up. **Out of scope**: ext-list customization, concurrency knob, per-source presets, Apple Photos integration.
+- Network access — outbound HTTPS to GitHub Releases only, for update checks and self-update. User-disablable via the Settings page (default on). Server bind remains 127.0.0.1 only.
+- Settings UI — partial. **In scope** for v1: destination path template, align-mtime-to-EXIF toggle, soft-match destination folders toggle, update-check toggle. Path template and soft-match are wired through the scan path; align-mtime consumption is the remaining follow-up. **Out of scope**: ext-list customization, concurrency knob, per-source presets, Apple Photos integration.
 - Sidecar pairing (XMP/JPG-pair/MODD)
 - Resumable runs after crash
 - Windows support — would need a different `syscall.Stat_t` shape and `start` for browser launch. Linux is supported alongside macOS via `os.UserConfigDir()` paths and an `xdg-open` shellout.

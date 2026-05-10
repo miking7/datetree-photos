@@ -601,6 +601,7 @@ func handleSettingsPost(w http.ResponseWriter, r *http.Request) {
 	cfg.PathTemplate = tpl
 	cfg.AlignMtimeToExif = parseCheckbox(r.FormValue("alignMtimeToExif"))
 	cfg.SoftMatchDestination = parseCheckbox(r.FormValue("softMatchDestination"))
+	cfg.UpdateChecksEnabled = parseCheckbox(r.FormValue("updateChecksEnabled"))
 	if err := cfg.Save(); err != nil {
 		_ = components.SettingsBanner(components.SettingsModel{
 			Error: "save failed: " + err.Error(),
@@ -620,10 +621,17 @@ func settingsModelFromConfig(cfg Config) components.SettingsModel {
 	if tpl == "" {
 		tpl = DefaultPathTemplate
 	}
+	latest, lastChecked, checking := updater.Snapshot()
 	return components.SettingsModel{
 		PathTemplate:         tpl,
 		AlignMtimeToExif:     cfg.AlignMtimeToExif,
 		SoftMatchDestination: cfg.SoftMatchDestination,
+		UpdateChecksEnabled:  cfg.UpdateChecksEnabled,
+		Version:              version,
+		LatestTag:            latest,
+		LastChecked:          lastChecked,
+		Checking:             checking,
+		UpdateAvailable:      latest != "" && version != devVersion && compareSemver(latest, version) > 0,
 		Presets:              pathTemplatePresets,
 		PreviewToday:         time.Now().Format(tpl),
 	}
@@ -646,6 +654,178 @@ func parseCheckbox(v string) bool {
 		return true
 	}
 	return false
+}
+
+func handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	updater.setChecking(true)
+	ctx, cancel := context.WithTimeout(r.Context(), httpTimeout)
+	defer cancel()
+	latest, _, err := updater.CheckLatest(ctx, version)
+	updater.recordResult(latest)
+
+	cfg := loadConfigOrEmpty()
+	recomputeBanner(cfg)
+
+	model := settingsModelFromConfig(cfg)
+	if err != nil {
+		model.UpdateError = err.Error()
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = components.UpdatesCard(model).Render(r.Context(), w)
+}
+
+func handleUpdateApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	latest, _, _ := updater.Snapshot()
+	if latest == "" {
+		_ = components.UpdateError("No update available. Run a check first.").Render(r.Context(), w)
+		return
+	}
+
+	upCtx, cancel := context.WithCancel(context.Background())
+	reporter := NewReporter()
+	ru := &RunningUpdate{
+		Reporter:  reporter,
+		Cancel:    cancel,
+		TargetTag: latest,
+		Started:   time.Now(),
+	}
+	if err := current.StartUpdate(ru); err != nil {
+		cancel()
+		_ = components.UpdateError(err.Error()).Render(r.Context(), w)
+		return
+	}
+
+	go runUpdate(upCtx, ru)
+
+	_ = components.UpdateProgress(components.UpdateProgressModel{TargetTag: latest}).Render(r.Context(), w)
+}
+
+func runUpdate(ctx context.Context, ru *RunningUpdate) {
+	var applyErr error
+	defer func() {
+		if rec := recover(); rec != nil {
+			applyErr = fmt.Errorf("update panic: %v", rec)
+		}
+		current.FinishUpdate(ru.TargetTag, applyErr)
+		ru.Reporter.Close()
+	}()
+	applyErr = ApplyUpdate(ctx, ru.TargetTag, ru.Reporter)
+}
+
+func handleUpdateEvents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	ru := current.RunningUpdate()
+	if ru == nil {
+		// Race: the apply may have finished before the EventSource connected.
+		// If a terminal outcome is pending, deliver it as a single complete
+		// event. Otherwise 404.
+		if outcome := current.LastUpdate(); outcome != nil {
+			writeSSEHeaders(w, flusher)
+			writeUpdateComplete(r.Context(), w, flusher, outcome)
+			return
+		}
+		http.Error(w, "no active update", http.StatusNotFound)
+		return
+	}
+
+	writeSSEHeaders(w, flusher)
+
+	ch, unsub := ru.Reporter.Subscribe()
+	defer unsub()
+
+	target := ru.TargetTag
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case p, ok := <-ch:
+			if !ok {
+				if outcome := current.LastUpdate(); outcome != nil && outcome.TargetTag == target {
+					writeUpdateComplete(r.Context(), w, flusher, outcome)
+				}
+				return
+			}
+			body := renderComponent(r.Context(), components.UpdateProgressBody(components.UpdateProgressModel{
+				TargetTag: target,
+				Phase:     p.Current,
+				Processed: p.Processed,
+				Total:     p.Total,
+			}))
+			if err := writeSSEEvent(w, "progress", body); err != nil {
+				return
+			}
+			flusher.Flush()
+		}
+	}
+}
+
+func writeUpdateComplete(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, outcome *UpdateOutcome) {
+	var body []byte
+	if outcome.Err != nil {
+		body = renderComponent(ctx, components.UpdateError(outcome.Err.Error()))
+	} else {
+		body = renderComponent(ctx, components.UpdateDone(outcome.TargetTag))
+	}
+	if err := writeSSEEvent(w, "complete", body); err == nil {
+		flusher.Flush()
+	}
+}
+
+func handleUpdateDismiss(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	latest, _, _ := updater.Snapshot()
+	if latest == "" {
+		// Nothing to dismiss; emit an empty banner regardless so the htmx swap
+		// removes the element.
+		_ = components.EmptyBanner().Render(r.Context(), w)
+		return
+	}
+	cfg := loadConfigOrEmpty()
+	cfg.DismissedUpdateVersion = latest
+	if err := cfg.Save(); err != nil {
+		log.Printf("dismiss save: %v", err)
+	}
+	recomputeBanner(cfg)
+	_ = components.EmptyBanner().Render(r.Context(), w)
+}
+
+func handleQuit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	_ = components.QuitGoodbye().Render(r.Context(), w)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	// Brief beat so the response reaches the browser before the listener
+	// closes; closing the listener unblocks http.Serve and lets main return.
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		if httpListener != nil {
+			_ = httpListener.Close()
+		}
+	}()
 }
 
 // handleManifest serves a previously-written manifest CSV. Path-traversal is

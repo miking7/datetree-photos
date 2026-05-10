@@ -26,6 +26,22 @@ type RunningExecute struct {
 	Started  time.Time
 }
 
+type RunningUpdate struct {
+	Reporter  *Reporter
+	Cancel    context.CancelFunc
+	TargetTag string
+	Started   time.Time
+}
+
+// UpdateOutcome is the terminal state of an apply attempt, captured so the SSE
+// handler can render the post-update screen (or a clean error) as the final
+// `complete` event after the reporter closes.
+type UpdateOutcome struct {
+	TargetTag string
+	Err       error
+	Finished  time.Time
+}
+
 // DoneSnapshot is captured at the end of an execute run so the SSE handler can
 // render the Done screen as the final `complete` event.
 type DoneSnapshot struct {
@@ -40,14 +56,16 @@ type DoneSnapshot struct {
 }
 
 type Session struct {
-	mu       sync.Mutex
-	moves    []PlannedMove
-	source   string
-	dest     string
-	mode     string
-	running  *RunningScan
-	executing *RunningExecute
-	lastDone *DoneSnapshot
+	mu         sync.Mutex
+	moves      []PlannedMove
+	source     string
+	dest       string
+	mode       string
+	running    *RunningScan
+	executing  *RunningExecute
+	updating   *RunningUpdate
+	lastDone   *DoneSnapshot
+	lastUpdate *UpdateOutcome
 }
 
 var current = &Session{}
@@ -81,7 +99,7 @@ func (s *Session) StartScan(rs *RunningScan) error {
 	if s.running != nil {
 		return errScanInProgress
 	}
-	if s.executing != nil {
+	if s.executing != nil || s.updating != nil {
 		return errOpInProgress
 	}
 	s.running = rs
@@ -111,7 +129,7 @@ func (s *Session) FinishScan(moves []PlannedMove) {
 func (s *Session) StartExecute(re *RunningExecute) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.running != nil || s.executing != nil {
+	if s.running != nil || s.executing != nil || s.updating != nil {
 		return errOpInProgress
 	}
 	s.executing = re
@@ -152,4 +170,43 @@ func (s *Session) LastDone() *DoneSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.lastDone
+}
+
+func (s *Session) StartUpdate(ru *RunningUpdate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.running != nil || s.executing != nil || s.updating != nil {
+		return errOpInProgress
+	}
+	s.updating = ru
+	return nil
+}
+
+func (s *Session) RunningUpdate() *RunningUpdate {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.updating
+}
+
+// FinishUpdate captures the terminal outcome and releases the running-update
+// slot. The reporter Close (in the caller's defer) wakes any SSE subscriber so
+// it can render the post-update screen from this snapshot.
+func (s *Session) FinishUpdate(target string, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.updating == nil {
+		return
+	}
+	s.lastUpdate = &UpdateOutcome{
+		TargetTag: target,
+		Err:       err,
+		Finished:  time.Now(),
+	}
+	s.updating = nil
+}
+
+func (s *Session) LastUpdate() *UpdateOutcome {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lastUpdate
 }

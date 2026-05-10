@@ -10,12 +10,14 @@ import (
 )
 
 type Config struct {
-	RecentSources        []string `json:"recentSources"`
-	RecentDestinations   []string `json:"recentDestinations"`
-	LastMode             string   `json:"lastMode"`
-	PathTemplate         string   `json:"pathTemplate"`
-	AlignMtimeToExif     bool     `json:"alignMtimeToExif"`
-	SoftMatchDestination bool     `json:"softMatchDestination"`
+	RecentSources          []string `json:"recentSources"`
+	RecentDestinations     []string `json:"recentDestinations"`
+	LastMode               string   `json:"lastMode"`
+	PathTemplate           string   `json:"pathTemplate"`
+	AlignMtimeToExif       bool     `json:"alignMtimeToExif"`
+	SoftMatchDestination   bool     `json:"softMatchDestination"`
+	UpdateChecksEnabled    bool     `json:"updateChecksEnabled"`
+	DismissedUpdateVersion string   `json:"dismissedUpdateVersion"`
 }
 
 // DefaultPathTemplate matches the v1 hardcoded layout in scanner.destRel
@@ -56,6 +58,7 @@ func freshConfig() Config {
 		PathTemplate:         DefaultPathTemplate,
 		AlignMtimeToExif:     true,
 		SoftMatchDestination: true,
+		UpdateChecksEnabled:  true,
 	}
 }
 
@@ -71,12 +74,14 @@ func LoadConfig() (Config, error) {
 	// false" (user unchecked the box). Absent inherits the new on-by-default
 	// values; an explicit false is preserved.
 	type rawConfig struct {
-		RecentSources        []string `json:"recentSources"`
-		RecentDestinations   []string `json:"recentDestinations"`
-		LastMode             string   `json:"lastMode"`
-		PathTemplate         string   `json:"pathTemplate"`
-		AlignMtimeToExif     *bool    `json:"alignMtimeToExif"`
-		SoftMatchDestination *bool    `json:"softMatchDestination"`
+		RecentSources          []string `json:"recentSources"`
+		RecentDestinations     []string `json:"recentDestinations"`
+		LastMode               string   `json:"lastMode"`
+		PathTemplate           string   `json:"pathTemplate"`
+		AlignMtimeToExif       *bool    `json:"alignMtimeToExif"`
+		SoftMatchDestination   *bool    `json:"softMatchDestination"`
+		UpdateChecksEnabled    *bool    `json:"updateChecksEnabled"`
+		DismissedUpdateVersion string   `json:"dismissedUpdateVersion"`
 	}
 	var r rawConfig
 	if err := json.Unmarshal(data, &r); err != nil {
@@ -95,6 +100,10 @@ func LoadConfig() (Config, error) {
 	if r.SoftMatchDestination != nil {
 		c.SoftMatchDestination = *r.SoftMatchDestination
 	}
+	if r.UpdateChecksEnabled != nil {
+		c.UpdateChecksEnabled = *r.UpdateChecksEnabled
+	}
+	c.DismissedUpdateVersion = r.DismissedUpdateVersion
 	return c, nil
 }
 

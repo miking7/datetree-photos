@@ -1,5 +1,7 @@
 package components
 
+import "time"
+
 type SettingsPreset struct {
 	Label  string
 	Layout string
@@ -12,6 +14,15 @@ type SettingsModel struct {
 	Presets              []SettingsPreset
 	PreviewToday         string // e.g. "2026/20260509"
 	Error                string
+
+	// Updates section
+	UpdateChecksEnabled bool
+	Version             string
+	LatestTag           string
+	LastChecked         time.Time
+	Checking            bool
+	UpdateAvailable     bool   // true iff LatestTag is newer than Version (and Version != "dev")
+	UpdateError         string // message from last manual check, if any
 }
 
 // PresetsJSON serializes the preset list for the inline preview script. The
@@ -112,6 +123,7 @@ templ Settings(m SettingsModel) {
 						</span>
 					</label>
 				}
+				@UpdatesCard(m)
 				<div class="flex justify-end gap-3">
 					<a href="/" class={ buttonClasses("outlined") }>Back</a>
 					@Button("primary", templ.Attributes{"type": "submit"}) {
