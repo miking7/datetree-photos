@@ -19,7 +19,7 @@ jobs:
         with:
           go-version: '1.26'
       - name: Install templ CLI
-        run: go install github.com/a-h/templ/cmd/templ@latest
+        run: go install github.com/a-h/templ/cmd/templ@v0.3.1001
       - name: Build Tailwind CSS
         run: make css
       - uses: goreleaser/goreleaser-action@v7

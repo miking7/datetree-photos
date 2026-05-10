@@ -2,7 +2,7 @@ version: 2
 
 before:
   hooks:
-    - go install github.com/a-h/templ/cmd/templ@latest
+    - go install github.com/a-h/templ/cmd/templ@v0.3.1001
     - templ generate
 
 builds:
